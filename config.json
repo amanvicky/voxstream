@@ -1,0 +1,149 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "audio": {
+    "input_device": 0,
+    "frame_ms": 30,
+    "standby_after_s": 45.0,
+    "zero_floor": 1e-05
+  },
+  "asr": {
+    "zipformer_dir": "models/zipformer",
+    "num_threads": 2,
+    "decoding_method": "greedy_search",
+    "source_language": null
+  },
+  "whisper": {
+    "dir": "models/whisper/small",
+    "compute_type": "int8",
+    "cpu_threads": 3
+  },
+  "vad": {
+    "model": "models/silero_vad.onnx",
+    "threshold": 0.5,
+    "min_speech_s": 0.25,
+    "min_silence_s": 0.6,
+    "max_buffer_s": 30.0
+  },
+  "voxlock": {
+    "model": "models/voxlock/embedding.onnx",
+    "enroll_model": "models/voxlock/enroll.onnx",
+    "chunk_model": "models/voxlock/chunk_int8.onnx",
+    "enabled": true,
+    "threshold": 0.62,
+    "isolation_mode": "overlap_voxlock",
+    "process_block_ms": 400,
+    "num_threads": 2,
+    "active_profile": null
+  },
+  "injection": {
+    "enabled": true,
+    "tier": "clipboard",
+    "max_chars": 5000,
+    "restore_clipboard": true,
+    "char_delay_s": 0.002,
+    "target_title": null
+  },
+  "translation": {
+    "enabled": false,
+    "target": "en"
+  },
+  "llm_polish_enabled": false,
+  "llm_endpoint": "http://127.0.0.1:11434/v1/chat/completions",
+  "llm_model": "auto",
+  "llm_timeout_s": 1.5,
+  "commands": {
+    "enabled": true,
+    "list": [
+      {
+        "name": "stop_listening",
+        "anchoring": "whole",
+        "patterns": [
+          "stop listening",
+          "stop recording",
+          "pause listening",
+          "mic off"
+        ]
+      },
+      {
+        "name": "start_listening",
+        "anchoring": "whole",
+        "patterns": [
+          "start listening",
+          "start recording",
+          "resume listening",
+          "mic on"
+        ]
+      },
+      {
+        "name": "new_line",
+        "anchoring": "prefix",
+        "patterns": [
+          "new line"
+        ]
+      },
+      {
+        "name": "new_paragraph",
+        "anchoring": "prefix",
+        "patterns": [
+          "new paragraph"
+        ]
+      },
+      {
+        "name": "scratch_that",
+        "anchoring": "whole",
+        "patterns": [
+          "scratch that",
+          "delete that",
+          "undo that"
+        ]
+      },
+      {
+        "name": "clear_all",
+        "anchoring": "whole",
+        "patterns": [
+          "clear all",
+          "clear everything"
+        ]
+      },
+      {
+        "name": "toggle_translate",
+        "anchoring": "whole",
+        "patterns": [
+          "translate mode",
+          "toggle translation",
+          "switch translation"
+        ]
+      },
+      {
+        "name": "pick_window",
+        "anchoring": "whole",
+        "patterns": [
+          "pick window",
+          "choose window",
+          "select window"
+        ]
+      }
+    ]
+  },
+  "custom_dictionary": {
+    "\\bg p u\\b": "GPU",
+    "\\bh d m i\\b": "HDMI",
+    "\\bsherpa onnx\\b": "sherpa-onnx",
+    "\\bv o x\\b": "VOX"
+  },
+  "hotkey": {
+    "mods": [
+      "ctrl",
+      "shift"
+    ],
+    "key": "space"
+  },
+  "history": {
+    "max_items": 50,
+    "db": "data/history.db"
+  },
+  "first_run_completed": true
+}

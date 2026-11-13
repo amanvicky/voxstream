@@ -1,0 +1,13 @@
+# VoxStream - 100% offline voice-to-text / live translation / single-speaker isolation
+# Target: Windows 10/11, CPU-only (Intel i5 11th gen), Python 3.10-3.12
+PySide6>=6.6,<7
+sherpa-onnx>=2.0,<3
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.24,<2
+scipy>=1.10
+pywin32>=306; sys_platform == "win32"
+psutil>=5.9
+fastapi>=0.110
+uvicorn>=0.27
+websockets>=12.0

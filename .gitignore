@@ -1,0 +1,23 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# --- VoxStream runtime data (never commit) ---
+models/
+profiles/
+logs/
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# --- build artifacts ---
+build/
+dist/
+release/
+*.spec.bak
