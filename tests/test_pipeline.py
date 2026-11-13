@@ -98,6 +98,7 @@ def main() -> int:
     section("19. WS isolation/AI-polish control round-trip")(test_ws_v2_controls)
     section("20. settings round-trip + first-run persistence")(test_settings_roundtrip)
     section("21. startup registry (isolated test key)")(test_startup_registry)
+    section("22. beginner safety net + friendly labels")(test_beginner_safety_net)
 
     print("=" * 72)
     fails = sum(1 for _, s, _ in RESULTS if s == "FAIL")
@@ -938,6 +939,70 @@ def test_startup_registry() -> str:
     except OSError:
         pass
     return f"enable/inspect/disable verified on isolated key {test_key!r}"
+
+
+def test_beginner_safety_net() -> str:
+    """Plain-English labels, desktop/taskbar detection and the copy banner."""
+    code = r'''
+import sys
+sys.path.insert(0, r'%s')
+from PySide6.QtWidgets import QApplication
+app = QApplication([])
+from ui.floating_hud import FloatingHUD
+labels = tuple(l for _k, l, _t in FloatingHUD.ISOLATION_MODES)
+assert labels == ("Everyone", "Only Me (Quiet Room)", "Only Me (Noisy Room)"), labels
+hud = FloatingHUD()
+hud.show()
+assert "Type Anywhere" in hud.btn_target.toolTip()
+hud.set_target("Notepad")
+assert "Lock App" in hud.btn_target.toolTip() and "Notepad" in hud.btn_target.toolTip()
+hud.set_final("hello from the practice sandbox")
+hud.show_no_text_box()
+assert hud.banner.isVisible()
+hud._copy_last_text()
+from PySide6.QtWidgets import QApplication as QA
+assert QA.clipboard().text() == "hello from the practice sandbox"
+from ui.tray_icon import TrayIcon
+tray = TrayIcon({"set_translate": lambda v: None, "set_isolation": lambda m: None})
+assert tray.act_translate.text() in ("Same Language", "Translate \u2192 English")
+assert tray._iso_actions["turn_titanet"].text() == "Only Me (Quiet Room)"
+assert tray.act_inject.text() == "Type my speech automatically"
+from ui.onboarding_wizard import OnboardingWizard
+w = OnboardingWizard(send_ws=lambda m: None)
+assert hasattr(w.target_page, "practice_box") and hasattr(w.target_page, "chk_shortcut")
+assert w.target_page.chk_shortcut.isChecked() and not w.target_page.chk_autostart.isChecked()
+print("UI_LABELS_OK")
+''' % str(ROOT)
+    out = subprocess.run([VENV_PY, "-c", code], capture_output=True, text=True,
+                         cwd=str(ROOT), timeout=120,
+                         env={**os.environ, "QT_QPA_PLATFORM": "offscreen"})
+    if "UI_LABELS_OK" not in out.stdout:
+        raise AssertionError(f"UI labels/sandbox check failed: {out.stdout[-400:]} {out.stderr[-400:]}")
+
+    # injector: shell-window classifier + disabled-injection passthrough
+    from backend import CONFIG
+    from backend.win32_injector import (SHELL_WINDOW_CLASSES,
+                                        foreground_accepts_text, TextInjector)
+    assert {"Progman", "WorkerW", "Shell_TrayWnd"} <= SHELL_WINDOW_CLASSES
+    if not isinstance(foreground_accepts_text(), bool):
+        raise AssertionError("foreground_accepts_text must return a bool")
+    inj = TextInjector(CONFIG)
+    original_inject = CONFIG.get("injection.enabled")
+    CONFIG.set("injection.enabled", False, save=False)
+    try:
+        if inj.inject_anywhere("test words") is not None:
+            raise AssertionError("disabled injector must not type anywhere")
+    finally:
+        CONFIG.set("injection.enabled", original_inject, save=False)
+    inj._reload()
+    inj.enabled = True
+    # No locked target: whatever happens, it must not raise and must be a
+    # tier name or the sentinel (depends on what the user currently focused).
+    result = inj.inject_anywhere("safety net probe")
+    if result is not None and result not in ("unicode", "no_text_box"):
+        raise AssertionError(f"unexpected inject_anywhere result: {result!r}")
+    return (f"labels/banner/clipboard verified offscreen; "
+            f"inject_anywhere -> {result!r}")
 
 
 if __name__ == "__main__":

@@ -75,6 +75,38 @@ def _save_ui_state(**kwargs) -> None:
         pass
 
 
+def _create_desktop_shortcut() -> bool:
+    """Create VoxStream.lnk on the user's Desktop via WScript.Shell."""
+    if getattr(sys, "frozen", False):
+        target = sys.executable
+        workdir = str(Path(sys.executable).resolve().parent)
+        icon = target
+    else:
+        target = str(ROOT / "start_voxstream.bat")
+        workdir = str(ROOT)
+        icon = ""
+    try:
+        script = (
+            "$ws = New-Object -ComObject WScript.Shell; "
+            "$desktop = [Environment]::GetFolderPath('Desktop'); "
+            "$lnk = $ws.CreateShortcut((Join-Path $desktop 'VoxStream.lnk')); "
+            f"$lnk.TargetPath = '{target}'; "
+            f"$lnk.WorkingDirectory = '{workdir}'; "
+            + (f"$lnk.IconLocation = '{icon}'; " if icon else "")
+            + "$lnk.Description = 'VoxStream - offline voice typing'; "
+            "$lnk.Save()"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-Command", script],
+                       creationflags=CREATE_NO_WINDOW, timeout=30, check=False)
+        return (Path.home() / "Desktop" / "VoxStream.lnk").exists() or \
+            (Path(os.environ.get("USERPROFILE", "")) / "OneDrive" / "Desktop" /
+             "VoxStream.lnk").exists()
+    except Exception as exc:
+        print(f"[app] desktop shortcut failed: {exc}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 class WSClient(QObject):
     """Reconnecting synchronous WebSocket client running in a daemon thread."""
@@ -348,6 +380,8 @@ class Controller(QObject):
         elif mtype == "rejected":
             self.hud.set_partial("")
             self.hud.set_rejected(msg.get("similarity"))
+        elif mtype == "no_text_box":
+            self.hud.show_no_text_box(str(msg.get("text") or ""))
         elif mtype == "command_executed":
             self.hud.set_command(str(msg.get("name") or ""))
         elif mtype == "request_pick_window":
@@ -436,12 +470,31 @@ class Controller(QObject):
         self.onboarding = OnboardingWizard(
             on_enroll=self._on_enroll_request,
             on_pick_window=self.pick_window,
-            on_finished=self._on_onboarding_finished)
+            on_finished=self._on_onboarding_finished,
+            send_ws=self.ws.send,
+            on_finish_options=self._apply_finish_options)
         self.onboarding.show()
 
     def _on_onboarding_finished(self) -> None:
         # Push wizard-made settings (device, isolation, ...) to the backend.
         self.ws.send({"type": "refresh_settings"})
+
+    def _apply_finish_options(self, desktop_shortcut: bool,
+                              autostart: bool) -> None:
+        """Wizard Finish: desktop shortcut + auto-start, fully silent."""
+        if desktop_shortcut:
+            ok = _create_desktop_shortcut()
+            self.tray.notify("VoxStream", "Desktop shortcut created."
+                             if ok else "Could not create the desktop shortcut.",
+                             error=not ok)
+        if autostart:
+            ok = startup_registry.set_enabled(True)
+            self.tray.act_startup.blockSignals(True)
+            self.tray.act_startup.setChecked(startup_registry.is_enabled())
+            self.tray.act_startup.blockSignals(False)
+            self.tray.notify("VoxStream", "VoxStream will start with Windows."
+                             if ok else "Could not enable Windows auto-start.",
+                             error=not ok)
 
     # -- settings dialog ------------------------------------------------------------ #
     def open_settings(self) -> None:

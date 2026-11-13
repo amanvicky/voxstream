@@ -24,9 +24,9 @@ import time
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QProgressBar, QPushButton,
-                               QVBoxLayout, QWizard, QWizardPage)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout,
+                               QLabel, QLineEdit, QPlainTextEdit, QProgressBar,
+                               QPushButton, QVBoxLayout, QWizard, QWizardPage)
 
 from backend import CONFIG
 from ui.enrollment_dialog import DARK_STYLE, record_sample, resolve_device
@@ -326,53 +326,117 @@ class EnrollPage(QWizardPage):
 
 
 class HotkeyTargetPage(QWizardPage):
-    """Step 3: hotkey recap + lock-window vs active-cursor demo."""
+    """Step 3: interactive "Try It Right Now" sandbox + setup options."""
 
-    def __init__(self, on_pick_window: Optional[Callable] = None, parent=None):
+    def __init__(self, on_pick_window: Optional[Callable] = None,
+                 send_ws: Optional[Callable] = None, parent=None):
         super().__init__(parent)
-        self.setTitle("Step 3 - Hotkey & typing target")
-        self.setSubTitle("How to control VoxStream and where your words land.")
+        self.setTitle("Step 3 - Try it right now")
+        self.setSubTitle("Prove that your microphone and typing work - before "
+                         "you close this window.")
         self._on_pick_window = on_pick_window
+        self._send_ws = send_ws
+        self._talking = False
 
         hk = CONFIG.get("hotkey", {}) or {}
         mods = " + ".join(m.capitalize() for m in (hk.get("mods") or ["Ctrl", "Shift"]))
         key = str(hk.get("key") or "space").capitalize()
 
         layout = QVBoxLayout(self)
-        hk_label = QLabel(f"<b>Global toggle:</b> {mods} + {key}")
-        hk_label.setTextFormat(Qt.TextFormat.RichText)
-        hk_label.setStyleSheet("font-size:14px; color:#22d3ee;")
-        layout.addWidget(hk_label)
-        hint = QLabel("Toggles listening from anywhere. Change it later in "
-                      "Tray > Settings.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color:#94a3b8; font-size:11px;")
-        layout.addWidget(hint)
-        layout.addSpacing(8)
 
-        layout.addWidget(QLabel("<b>Where does dictation land?</b>"))
-        target_hint = QLabel(
-            "- Active Cursor (default): text is typed into whatever window "
-            "currently has focus - just click into Notepad/your editor and talk.\n"
-            "- Locked Window (crosshair): pin dictation to one specific window "
-            "so tab/app switches never interrupt it - VoxStream types into the "
-            "background without stealing focus.")
-        target_hint.setWordWrap(True)
-        layout.addWidget(target_hint)
+        # --- practice sandbox ------------------------------------------------
+        layout.addWidget(QLabel("<b>1. Practice box</b> - click into it, then talk:"))
+        self.practice_box = QPlainTextEdit()
+        self.practice_box.setPlaceholderText(
+            "Click here, press Start Talking, and say anything to see VoxStream "
+            "type live...")
+        self.practice_box.setMinimumHeight(110)
+        self.practice_box.setStyleSheet(
+            "QPlainTextEdit { background:#1e2230; color:#e2e8f0; font-size:13px;"
+            " border:2px solid #334155; border-radius:8px; padding:6px; }")
+        layout.addWidget(self.practice_box, stretch=1)
+
+        talk_row = QHBoxLayout()
+        self.btn_talk = QPushButton("Start Talking (Ctrl + Shift + Space)")
+        self.btn_talk.setFixedHeight(36)
+        self.btn_talk.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_talk.setStyleSheet(
+            "QPushButton { background:#16a34a; color:#ffffff; font-weight:bold;"
+            " border:none; border-radius:8px; padding:6px 18px; font-size:13px; }"
+            "QPushButton:hover { background:#22c55e; }"
+            "QPushButton:disabled { background:#334155; color:#64748b; }")
+        self.btn_talk.clicked.connect(self._toggle_talk)
+        talk_row.addWidget(self.btn_talk)
+        self.talk_status = QLabel("Tip: click the box above first so we know "
+                                  "where to type.")
+        self.talk_status.setStyleSheet("color:#94a3b8; font-size:11px;")
+        talk_row.addWidget(self.talk_status, stretch=1)
+        layout.addLayout(talk_row)
+
+        # --- hotkey + target recap ---------------------------------------------
+        hk_label = QLabel(f"<b>Global toggle:</b> {mods} + {key} &nbsp;&nbsp;|&nbsp;&nbsp;"
+                          "<b>Lock App \U0001F3AF:</b> keep typing into one app "
+                          "even while you browse Chrome")
+        hk_label.setTextFormat(Qt.TextFormat.RichText)
+        hk_label.setWordWrap(True)
+        hk_label.setStyleSheet("font-size:12px; color:#e2e8f0;")
+        layout.addWidget(hk_label)
 
         row = QHBoxLayout()
-        btn_lock = QPushButton("Try it: Lock a target window (crosshair)")
+        btn_lock = QPushButton("Lock an app \U0001F3AF (pick with crosshair)")
         btn_lock.clicked.connect(self._pick)
         row.addWidget(btn_lock)
         row.addStretch(1)
         layout.addLayout(row)
-        layout.addStretch(1)
 
-        done = QLabel("Finish to start dictating. You can reopen this wizard "
-                      "anytime from the tray menu ('Setup & Mic Check').")
+        # --- setup options -------------------------------------------------------
+        layout.addWidget(QLabel("<b>2. Handy shortcuts</b>"))
+        self.chk_shortcut = QCheckBox("Add Desktop Shortcut")
+        self.chk_shortcut.setChecked(True)
+        layout.addWidget(self.chk_shortcut)
+        self.chk_autostart = QCheckBox("Start automatically when Windows boots")
+        self.chk_autostart.setChecked(False)
+        layout.addWidget(self.chk_autostart)
+
+        done = QLabel("Press Finish when you're ready - you can reopen this "
+                      "wizard anytime from the tray menu ('Setup & Mic Check').")
         done.setWordWrap(True)
         done.setStyleSheet("color:#94a3b8;")
         layout.addWidget(done)
+
+    # -- practice sandbox ------------------------------------------------------ #
+    def _toggle_talk(self) -> None:
+        self._talking = not self._talking
+        if self._talking:
+            # Practice always runs in Type Anywhere mode: forget any locked app.
+            if self._send_ws:
+                self._send_ws({"type": "clear_target"})
+                self._send_ws({"type": "start"})
+            self.btn_talk.setText("Stop Talking")
+            self.btn_talk.setStyleSheet(
+                "QPushButton { background:#dc2626; color:#ffffff; font-weight:bold;"
+                " border:none; border-radius:8px; padding:6px 18px; font-size:13px; }"
+                "QPushButton:hover { background:#ef4444; }"
+                "QPushButton:disabled { background:#334155; color:#64748b; }")
+            self.talk_status.setText("Listening! Say something - it will appear "
+                                     "in the box above.")
+            self.talk_status.setStyleSheet("color:#22d3ee; font-size:11px;")
+            self.practice_box.setFocus()
+        else:
+            if self._send_ws:
+                self._send_ws({"type": "stop"})
+            self.btn_talk.setText("Start Talking (Ctrl + Shift + Space)")
+            self.btn_talk.setStyleSheet(
+                "QPushButton { background:#16a34a; color:#ffffff; font-weight:bold;"
+                " border:none; border-radius:8px; padding:6px 18px; font-size:13px; }"
+                "QPushButton:hover { background:#22c55e; }"
+                "QPushButton:disabled { background:#334155; color:#64748b; }")
+            self.talk_status.setText("Stopped. Did your words appear? You're all set!")
+            self.talk_status.setStyleSheet("color:#94a3b8; font-size:11px;")
+
+    def cleanupPage(self) -> None:  # noqa: N802
+        if self._talking:
+            self._toggle_talk()  # never leave the mic running from the wizard
 
     def _pick(self) -> None:
         if self._on_pick_window:
@@ -388,21 +452,26 @@ class OnboardingWizard(QWizard):
     def __init__(self, on_enroll: Optional[Callable] = None,
                  on_pick_window: Optional[Callable] = None,
                  on_finished: Optional[Callable] = None,
+                 send_ws: Optional[Callable] = None,
+                 on_finish_options: Optional[Callable] = None,
                  parent=None):
         super().__init__(parent)
         self.setWindowTitle("Welcome to VoxStream")
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
-        self.setMinimumSize(560, 420)
+        self.setMinimumSize(600, 520)
         self.setStyleSheet(WIZARD_STYLE)
         self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
 
         self._on_enroll = on_enroll
         self._on_finished = on_finished
+        self._send_ws = send_ws
+        self._on_finish_options = on_finish_options
 
         self.mic_page = MicCheckPage()
         self.enroll_page = EnrollPage()
         self.enroll_page.enrollRequested.connect(self._send_enroll)
-        self.target_page = HotkeyTargetPage(on_pick_window=on_pick_window)
+        self.target_page = HotkeyTargetPage(on_pick_window=on_pick_window,
+                                            send_ws=send_ws)
         self.addPage(self.mic_page)
         self.addPage(self.enroll_page)
         self.addPage(self.target_page)
@@ -416,6 +485,13 @@ class OnboardingWizard(QWizard):
         self.enroll_page.on_enroll_result(result)
 
     def accept(self) -> None:  # noqa: N802  (Finish pressed)
+        if self._on_finish_options:
+            try:
+                self._on_finish_options(
+                    desktop_shortcut=self.target_page.chk_shortcut.isChecked(),
+                    autostart=self.target_page.chk_autostart.isChecked())
+            except Exception:
+                pass
         CONFIG.set("first_run_completed", True)
         if self._on_finished:
             try:

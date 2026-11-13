@@ -369,11 +369,22 @@ class Pipeline:
 
         injected_tier: Optional[str] = None
         injected_chars = 0
-        if bool(self.cfg.get("injection.enabled", True)) and self.injector.is_target_valid():
-            tier = self.injector.inject(final_text + " ")
-            if tier:
-                injected_tier = tier
-                injected_chars = len(final_text) + 1
+        if bool(self.cfg.get("injection.enabled", True)):
+            if self.injector.is_target_valid():
+                tier = self.injector.inject(final_text + " ")
+                if tier:
+                    injected_tier = tier
+                    injected_chars = len(final_text) + 1
+            else:
+                # "Type Anywhere": type into whatever the user focused on;
+                # if they're on the desktop/taskbar there is no text box -
+                # tell the UI to show the friendly "Copy Last Text" banner.
+                tier = self.injector.inject_anywhere(final_text + " ")
+                if tier == "no_text_box":
+                    self.emit({"type": "no_text_box", "text": final_text})
+                elif tier:
+                    injected_tier = tier
+                    injected_chars = len(final_text) + 1
 
         row = self.history.add(
             final_text, lang=res.get("language"), translated=translate,

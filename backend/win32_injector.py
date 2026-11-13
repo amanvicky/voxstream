@@ -222,6 +222,31 @@ def get_foreground_hwnd() -> Optional[int]:
         return None
 
 
+# Windows shell surfaces where no text input can ever exist.
+SHELL_WINDOW_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd",
+                        "Shell_SecondaryTrayWnd"}
+
+
+def foreground_window_class() -> Optional[str]:
+    if not _HAS_PYWIN32:
+        return None
+    try:
+        hwnd = get_foreground_hwnd()
+        if not hwnd:
+            return None
+        return win32gui.GetClassName(hwnd)
+    except Exception:
+        return None
+
+
+def foreground_accepts_text() -> bool:
+    """False when the user is focused on the desktop/taskbar (no text box)."""
+    cls = foreground_window_class()
+    if cls is None:
+        return True  # unknown -> assume a normal app
+    return cls not in SHELL_WINDOW_CLASSES
+
+
 def root_window(hwnd: int) -> Optional[int]:
     if not _HAS_PYWIN32 or not hwnd:
         return None
@@ -348,6 +373,32 @@ class TextInjector:
             except Exception:
                 continue
         return None
+
+    def inject_anywhere(self, text: str) -> Optional[str]:
+        """Beginner-friendly "Type Anywhere" fallback (no locked target).
+
+        Returns the tier used ("unicode"), the sentinel string
+        ``"no_text_box"`` when the focused surface cannot accept text
+        (Windows desktop / taskbar), or ``None`` on failure.
+        """
+        self._reload()
+        if not text or not self.enabled:
+            return None
+        if self.is_target_valid():
+            return self.inject(text)
+        hwnd = get_foreground_hwnd()
+        if not hwnd:
+            return None
+        try:
+            cls = win32gui.GetClassName(hwnd)
+        except Exception:
+            cls = ""
+        if cls in SHELL_WINDOW_CLASSES:
+            return "no_text_box"   # nowhere to type - caller shows the banner
+        text = text[: self.max_chars].replace("\r\n", "\r").replace("\n", "\r")
+        # The window already has keyboard focus: send unicode directly.
+        events = unicode_key_events(text, char_delay=self.char_delay)
+        return "unicode" if send_inputs(events) else None
 
     def send_backspaces(self, n: int) -> bool:
         """Delete ``n`` characters in the target (focused: SendInput, else WM_KEYDOWN)."""

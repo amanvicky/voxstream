@@ -4,6 +4,23 @@
 Always-on dictation that survives tab &amp; app switches — typed straight into
 any window, isolated to <i>your</i> voice, transcribed and translated entirely on your CPU.</p>
 
+## Download & Install (For Everyone — 30 Seconds)
+
+1. On the [Releases](../../releases) page, download **`VoxStream-Setup-v2.0.exe`**.
+2. Double-click it → **Next → Install → Finish** (leave "Launch VoxStream now"
+   ticked). No admin password needed — it installs just for you.
+3. A friendly wizard appears: pick your microphone, record 5 seconds of your
+   voice ("Only Me" mode — or skip for "Everyone"), then press **Start
+   Talking** in the practice box and watch your words appear.
+4. Done. Open Notepad (or ChatGPT in your browser), click into the text box,
+   and talk. Press **`Ctrl + Shift + Space`** anytime to start/stop.
+
+> Prefer no installer? Download **`VoxStream-v2.0-win64.zip`** instead,
+> extract, and run `VoxStream.exe` — fully portable, nothing installed.
+
+**Installing for the first time?** You don't need any of the sections below —
+they're for developers who want to build VoxStream from source.
+
 ## What problem does VoxStream solve?
 
 Cloud dictation dies the moment you switch tabs, uploads your voice, and

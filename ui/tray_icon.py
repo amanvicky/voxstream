@@ -181,35 +181,50 @@ class TrayIcon(QSystemTrayIcon):
         self.act_startup.toggled.connect(cb.get("toggle_startup", lambda _v: None))
         menu.addAction(self.act_startup)
 
-        act_enroll = QAction("Enroll voice (VoxLock)...")
+        act_enroll = QAction("Set up 'Only Me' voice (5-second sample)...")
         act_enroll.triggered.connect(cb.get("enroll", lambda: None))
         menu.addAction(act_enroll)
 
-        self.act_translate = QAction("Translate -> English")
+        self.act_translate = QAction("Same Language")
         self.act_translate.setCheckable(True)
-        self.act_translate.toggled.connect(cb.get("set_translate", lambda _v: None))
+        self.act_translate.setToolTip(
+            "Checked: your speech is translated to English.\n"
+            "Unchecked: we keep whatever language you speak.")
+        self.act_translate.toggled.connect(
+            lambda checked, act=None: self._on_translate_toggled(checked))
         menu.addAction(self.act_translate)
 
-        self.act_inject = QAction("Type into locked window")
+        self.act_inject = QAction("Type my speech automatically")
         self.act_inject.setCheckable(True)
         self.act_inject.setChecked(True)
+        self.act_inject.setToolTip(
+            "When checked, VoxStream types your words as you speak.\n"
+            "When unchecked, your words are only saved in History.")
         self.act_inject.toggled.connect(cb.get("set_inject", lambda _v: None))
         menu.addAction(self.act_inject)
 
-        # 3-way speaker-isolation selector (exclusive radio group)
+        # 3-way speaker-isolation selector (exclusive radio group, plain English)
         menu.addSeparator()
-        iso_header = QAction("Speaker isolation:")
+        iso_header = QAction("Whose voice should we type?")
         iso_header.setEnabled(False)
         menu.addAction(iso_header)
         self._iso_actions = {}
         iso_group = QActionGroup(menu)
         iso_group.setExclusive(True)
-        for key, label in (("off", "Anyone"),
-                           ("turn_titanet", "Only Me (Fast)"),
-                           ("overlap_voxlock", "Only Me (Overlap)")):
+        iso_tips = {
+            "off": "Transcribes every speaker - good for interviews or group notes.",
+            "turn_titanet": "Ignores other people talking in the room using your "
+                            "5-second voice sample.",
+            "overlap_voxlock": "Ignores other people talking in the room using your "
+                               "5-second voice sample - even when they talk over you.",
+        }
+        for key, label in (("off", "Everyone"),
+                           ("turn_titanet", "Only Me (Quiet Room)"),
+                           ("overlap_voxlock", "Only Me (Noisy Room)")):
             act = QAction(label, menu)
             act.setCheckable(True)
             act.setData(key)
+            act.setToolTip(iso_tips[key])
             iso_group.addAction(act)
             act.toggled.connect(
                 lambda checked, k=key: checked and cb.get("set_isolation", lambda _v: None)(k))
@@ -246,11 +261,21 @@ class TrayIcon(QSystemTrayIcon):
             self.act_listen.setText(
                 "Stop listening" if state == "listening" else "Start listening")
 
+    def _on_translate_toggled(self, checked: bool) -> None:
+        """Relabel the language mode in plain English and forward the change."""
+        self.act_translate.setText("Translate \u2192 English" if checked
+                                   else "Same Language")
+        cb = self._callbacks.get("set_translate")
+        if cb:
+            cb(bool(checked))
+
     def set_flags(self, translate: Optional[bool] = None,
                   inject: Optional[bool] = None) -> None:
         if translate is not None and hasattr(self, "act_translate"):
             self.act_translate.blockSignals(True)
             self.act_translate.setChecked(bool(translate))
+            self.act_translate.setText("Translate \u2192 English" if translate
+                                       else "Same Language")
             self.act_translate.blockSignals(False)
         if inject is not None and hasattr(self, "act_inject"):
             self.act_inject.blockSignals(True)

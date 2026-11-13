@@ -133,14 +133,25 @@ class FloatingHUD(QWidget):
     llmToggled = Signal(bool)        # AI polish (local LLM) on/off
     quitRequested = Signal()
 
-    # mode key -> (selector label, tooltip)
+    # mode key -> (selector label, tooltip)  [plain-English labels]
     ISOLATION_MODES = (
-        ("off", "Anyone", "Transcribe every speaker (no isolation)"),
-        ("turn_titanet", "Only Me (Fast)",
-         "Voiceprint gate blocks other speakers (low latency)"),
-        ("overlap_voxlock", "Only Me (Overlap)",
-         "VoxLock strips overlapping voices from the waveform itself"),
+        ("off", "Everyone",
+         "Transcribes every speaker - good for interviews or group notes."),
+        ("turn_titanet", "Only Me (Quiet Room)",
+         "Ignores other people talking in the room using your 5-second voice sample."),
+        ("overlap_voxlock", "Only Me (Noisy Room)",
+         "Ignores other people talking in the room using your 5-second voice sample - "
+         "even when they talk over you at the same time."),
     )
+
+    TARGET_TYPE_ANYWHERE_TIP = (
+        "Type Anywhere: types your speech into whatever app or browser box you "
+        "click into (ChatGPT, Chrome, Word, etc.).\n"
+        "Click \U0001F3AF to lock one app instead - VoxStream keeps typing there "
+        "even while you browse Chrome.")
+    TARGET_LOCKED_TIP = (
+        "Lock App \U0001F3AF: VoxStream keeps typing into '{title}' even while "
+        "you browse Chrome.\nClick \U0001F3AF to pick another app.")
 
     def __init__(self, config=None):
         super().__init__(None)
@@ -176,11 +187,13 @@ class FloatingHUD(QWidget):
         self.partial_label.setWordWrap(False)
         pill_row.addWidget(self.partial_label, stretch=1)
 
-        # 3-way speaker-isolation selector: Anyone | Only Me (Fast) | Only Me (Overlap)
+        # 3-way speaker-isolation selector (plain-English labels)
         self.isolation_box = QComboBox()
         self.isolation_box.setObjectName("isolationBox")
         for key, label, tip in self.ISOLATION_MODES:
             self.isolation_box.addItem(label, userData=key)
+            self.isolation_box.setItemData(self.isolation_box.count() - 1, tip,
+                                           Qt.ItemDataRole.ToolTipRole)
         self.isolation_box.setToolTip(self.ISOLATION_MODES[2][2])
         self.isolation_box.setFixedWidth(150)
         self.isolation_box.setStyleSheet(
@@ -209,7 +222,7 @@ class FloatingHUD(QWidget):
         self.btn_target.setIcon(make_icon("target"))
         self.btn_target.setIconSize(self.btn_target.size() * 0.6)
         self.btn_target.setStyleSheet(STYLE_BUTTON)
-        self.btn_target.setToolTip("Lock a target window for typing (click, then pick)")
+        self.btn_target.setToolTip(self.TARGET_TYPE_ANYWHERE_TIP)
         self.btn_target.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_target.clicked.connect(self.pickRequested.emit)
         pill_row.addWidget(self.btn_target)
@@ -238,6 +251,32 @@ class FloatingHUD(QWidget):
         self._subtitle_timer.setSingleShot(True)
         self._subtitle_timer.timeout.connect(
             lambda: self.subtitle_label.setText(""))
+
+        # --- "no text box" safety-net banner (auto-dismissing) ----------------
+        self.banner = QWidget(self)
+        banner_row = QHBoxLayout(self.banner)
+        banner_row.setContentsMargins(0, 0, 0, 0)
+        banner_row.setSpacing(6)
+        self.banner_label = QLabel("No text box selected - your words were saved.")
+        self.banner_label.setStyleSheet(
+            "color:#fbbf24; font-size:11px; background:transparent;")
+        banner_row.addWidget(self.banner_label, stretch=1)
+        self.btn_copy_last = QPushButton("Copy Last Text")
+        self.btn_copy_last.setFixedHeight(22)
+        self.btn_copy_last.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_copy_last.setStyleSheet(
+            "QPushButton { background:#f59e0b; color:#111827; border:none;"
+            " border-radius:6px; padding:2px 10px; font-size:11px; font-weight:bold; }"
+            "QPushButton:hover { background:#fbbf24; }")
+        self.btn_copy_last.clicked.connect(self._copy_last_text)
+        banner_row.addWidget(self.btn_copy_last)
+        self.banner.setVisible(False)
+        root.addWidget(self.banner)
+
+        self._banner_timer = QTimer(self)
+        self._banner_timer.setSingleShot(True)
+        self._banner_timer.timeout.connect(lambda: self.banner.setVisible(False))
+        self._last_final_text = ""
 
         self.resize(560, 92)
         self._restore_position()
@@ -365,12 +404,33 @@ class FloatingHUD(QWidget):
         prefix = "[EN] " if translated else ""
         if polished:
             prefix += "[AI] "
+        self._last_final_text = text
         metrics = self.subtitle_label.fontMetrics()
         self.subtitle_label.setStyleSheet(
             "color:#a5f3fc; font-style:italic; font-size:12px; background:transparent;")
         self.subtitle_label.setText(
             metrics.elidedText(prefix + text, Qt.TextElideMode.ElideRight, 520))
         self._subtitle_timer.start(8000)
+
+    def show_no_text_box(self, text: str = "") -> None:
+        """Safety net: spoken words had nowhere to land (desktop/taskbar)."""
+        if text:
+            self._last_final_text = text
+        self.banner.setVisible(True)
+        self.banner_label.setText("No text box selected - your words were saved. "
+                                  "Click into a text box and talk again.")
+        self._banner_timer.start(10000)
+
+    def _copy_last_text(self) -> None:
+        try:
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(self._last_final_text or "")
+            self.banner_label.setText("Copied! Paste it anywhere with Ctrl+V.")
+            self.banner_label.setStyleSheet(
+                "color:#22d3ee; font-size:11px; background:transparent;")
+            self._banner_timer.start(6000)
+        except Exception:
+            self._banner_timer.start(2000)
 
     def set_rejected(self, similarity: Optional[float]) -> None:
         sim = f" (sim {similarity:.2f})" if similarity is not None else ""
@@ -381,11 +441,13 @@ class FloatingHUD(QWidget):
 
     def set_target(self, title: Optional[str]) -> None:
         if title:
-            self.btn_target.setToolTip(f"Typing into: {title}\nClick to re-pick")
-            self.subtitle_label.setText(f"Target: {title}")
+            self.btn_target.setToolTip(self.TARGET_LOCKED_TIP.format(title=title))
+            self.subtitle_label.setText(f"Lock App \U0001F3AF: {title}")
             self._subtitle_timer.start(6000)
         else:
-            self.btn_target.setToolTip("Lock a target window for typing (click, then pick)")
+            self.btn_target.setToolTip(self.TARGET_TYPE_ANYWHERE_TIP)
+            self.subtitle_label.setText("Type Anywhere mode - click into any text box and talk")
+            self._subtitle_timer.start(6000)
 
     def set_toggle_icons(self, listening: bool) -> None:
         self.btn_mic.setToolTip("Stop listening (Ctrl+Shift+Space)" if listening
@@ -412,9 +474,9 @@ class FloatingHUD(QWidget):
     def _open_menu(self) -> None:
         menu = QMenu(self)
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        act_pick = menu.addAction(make_icon("target"), "Pick target window...")
+        act_pick = menu.addAction(make_icon("target"), "Lock App \U0001F3AF (choose where to type)...")
         act_pick.triggered.connect(self.pickRequested.emit)
-        act_enroll = menu.addAction(make_icon("mic"), "Enroll voice (VoxLock)...")
+        act_enroll = menu.addAction(make_icon("mic"), "Set up 'Only Me' voice (5-second sample)...")
         act_enroll.triggered.connect(self.enrollRequested.emit)
 
         act_llm = menu.addAction("AI Polish (local LLM)")
@@ -423,12 +485,19 @@ class FloatingHUD(QWidget):
         act_llm.toggled.connect(self.llmToggled.emit)
 
         cfg = self.config
-        act_translate = menu.addAction("Translate -> English")
+        translate_on = bool(cfg.get("translation.enabled", False)) if cfg else False
+        act_translate = menu.addAction("Translate \u2192 English" if translate_on
+                                       else "Same Language")
         act_translate.setCheckable(True)
-        act_translate.setChecked(bool(cfg.get("translation.enabled", False)) if cfg else False)
-        act_translate.toggled.connect(self.translateToggled.emit)
+        act_translate.setChecked(translate_on)
+        act_translate.setToolTip("When checked, your speech is translated to English. "
+                                 "When unchecked, we keep whatever language you speak.")
+        act_translate.toggled.connect(
+            lambda checked: (act_translate.setText("Translate \u2192 English" if checked
+                                                  else "Same Language"),
+                             self.translateToggled.emit(checked)))
 
-        act_inject = menu.addAction("Type into locked window")
+        act_inject = menu.addAction("Type my speech automatically")
         act_inject.setCheckable(True)
         act_inject.setChecked(bool(cfg.get("injection.enabled", True)) if cfg else False)
         act_inject.toggled.connect(self.injectToggled.emit)

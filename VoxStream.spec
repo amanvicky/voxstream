@@ -94,6 +94,7 @@ exe = EXE(
     upx=False,
     console=False,               # windowed: no terminal on launch
     disable_windowed_traceback=False,
+    icon=str(PROJECT / "installer" / "app_icon.ico"),
 )
 coll = COLLECT(
     exe,
